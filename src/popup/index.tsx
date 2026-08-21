@@ -67,6 +67,11 @@ export default function Popup() {
     window.close()
   }
 
+  function openSite() {
+    chrome.tabs.create({ url: "https://lastleaf.umbrova.com" })
+    window.close()
+  }
+
   return (
     <div style={{ width: "240px", fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif", background: "#ffffff", overflow: "hidden" }}>
 
@@ -94,14 +99,30 @@ export default function Popup() {
         <MenuItem icon="ti-layout-grid" label="Dashboard" sub="View your tab graveyard" onClick={openDashboard} />
         <div style={{ height: "0.5px", background: "#F0EDE6", margin: "0 16px" }} />
         <MenuItem icon="ti-settings" label="Settings" sub="Capture, data & preferences" onClick={openSettings} />
-        <div style={{ height: "0.5px", background: "#F0EDE6", margin: "0 16px" }} />
-        <MenuItem icon="ti-mail" label="Send feedback" sub="hello@umbrova.com" onClick={openFeedback} />
       </div>
 
       {/* Footer */}
       <div style={{ padding: "8px 16px", borderTop: "0.5px solid #F0EDE6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ fontSize: "11px", color: "#B4B2A9" }}>© 2026 Umbrova</span>
-        <span style={{ fontSize: "11px", color: "#B4B2A9" }}>v{chrome.runtime.getManifest().version}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <button
+            onClick={openFeedback}
+            aria-label="Email hello@umbrova.com"
+            title="hello@umbrova.com"
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#B4B2A9", display: "flex", alignItems: "center" }}
+          >
+            <i className="ti ti-mail" style={{ fontSize: "13px" }} aria-hidden="true" />
+          </button>
+          <button
+            onClick={openSite}
+            aria-label="lastleaf.umbrova.com"
+            title="lastleaf.umbrova.com"
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#B4B2A9", display: "flex", alignItems: "center" }}
+          >
+            <i className="ti ti-world" style={{ fontSize: "13px" }} aria-hidden="true" />
+          </button>
+          <span style={{ fontSize: "11px", color: "#B4B2A9" }}>v{chrome.runtime.getManifest().version}</span>
+        </div>
       </div>
 
     </div>

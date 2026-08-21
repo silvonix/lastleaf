@@ -20,25 +20,83 @@ function getPositions(count: number): { x: number; y: number }[] {
     const row = Math.floor(i / cols)
     const col = i % cols
     positions.push({
-      x: 24 + col * GAP_X + jitter(i * 2),
-      y: 24 + row * GAP_Y + jitter(i * 2 + 1)
+      x: col * GAP_X + jitter(i * 2),
+      y: row * GAP_Y + jitter(i * 2 + 1)
     })
   }
   return positions
 }
 
-// An edge exists between two clusters only when they actually share
-// keywords — the connection (and its thickness) reflects a real
-// relationship in the data, not a fixed decorative pattern.
-function getEdges(clusters: Cluster[]): { a: number; b: number; strength: number }[] {
-  const edges: { a: number; b: number; strength: number }[] = []
+// Miscellaneous mixes unrelated sites by definition, so rather than let
+// it land wherever its tab count happens to rank (usually top-left,
+// since it's often the biggest single cluster), it always occupies the
+// grid's geometric center slot — the other clusters keep their existing
+// sort order and fill around it.
+function centerMiscellaneous(clusters: Cluster[]): Cluster[] {
+  const miscIndex = clusters.findIndex(c => c.category === "uncategorised")
+  if (miscIndex === -1) return clusters
+
+  const count = clusters.length
+  const cols = Math.max(1, Math.ceil(Math.sqrt(count)))
+  const rows = Math.max(1, Math.ceil(count / cols))
+  const centerSlot = Math.min(
+    Math.floor((rows - 1) / 2) * cols + Math.floor((cols - 1) / 2),
+    count - 1
+  )
+
+  const misc = clusters[miscIndex]
+  const rest = clusters.filter((_, i) => i !== miscIndex)
+
+  const ordered: Cluster[] = new Array(count)
+  ordered[centerSlot] = misc
+  let restIdx = 0
+  for (let i = 0; i < count; i++) {
+    if (i === centerSlot) continue
+    ordered[i] = rest[restIdx++]
+  }
+  return ordered
+}
+
+// Categories that are typically related even with no shared keywords —
+// used as a fallback signal so the graph isn't only as dense as literal
+// keyword overlap allows. Deliberately conservative; not every pairing
+// that could plausibly relate is listed, just the clearer ones.
+const RELATED_CATEGORIES: Record<string, string[]> = {
+  coding:   ["reading", "design", "docs"],
+  reading:  ["coding", "news", "docs"],
+  design:   ["coding", "shopping"],
+  shopping: ["finance", "design", "travel"],
+  finance:  ["shopping"],
+  social:   ["video", "news"],
+  video:    ["social"],
+  travel:   ["shopping"],
+  news:     ["reading", "social"],
+  docs:     ["coding", "reading"],
+}
+
+function categoriesRelated(a: string, b: string): boolean {
+  return (RELATED_CATEGORIES[a] ?? []).includes(b)
+}
+
+// An edge exists between two clusters when they share keywords (the
+// strongest signal), or — failing that — when their categories are
+// known to typically relate, as a fainter fallback so the graph isn't
+// sparser than it needs to be just because titles didn't happen to
+// share an exact word.
+function getEdges(clusters: Cluster[]): { a: number; b: number; strength: number; viaCategory: boolean }[] {
+  const edges: { a: number; b: number; strength: number; viaCategory: boolean }[] = []
   for (let i = 0; i < clusters.length; i++) {
     const kwA = new Set(clusters[i].keywords)
     for (let j = i + 1; j < clusters.length; j++) {
       const kwB = clusters[j].keywords
       let shared = 0
       for (const kw of kwB) if (kwA.has(kw)) shared++
-      if (shared > 0) edges.push({ a: i, b: j, strength: shared })
+
+      if (shared > 0) {
+        edges.push({ a: i, b: j, strength: shared, viaCategory: false })
+      } else if (categoriesRelated(clusters[i].category, clusters[j].category)) {
+        edges.push({ a: i, b: j, strength: 0, viaCategory: true })
+      }
     }
   }
   return edges
@@ -54,21 +112,47 @@ export function Graph({ clusters, selectedId, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
-  const [zoom, setZoom] = useState(1.15)
+  const [zoom, setZoom] = useState(1.0)
 
-  const positions = useMemo(() => getPositions(clusters.length), [clusters.length])
-  const edges = useMemo(() => getEdges(clusters), [clusters])
+  // Miscellaneous always sits at the grid's center slot rather than
+  // wherever its tab count would naturally rank it
+  const orderedClusters = useMemo(() => centerMiscellaneous(clusters), [clusters])
+
+  const rawPositions = useMemo(() => getPositions(orderedClusters.length), [orderedClusters.length])
+
+  const gridW = useMemo(() => {
+    if (!rawPositions.length) return 0
+    return Math.max(...rawPositions.map(p => p.x)) + CARD_W
+  }, [rawPositions])
+  const gridH = useMemo(() => {
+    if (!rawPositions.length) return 0
+    return Math.max(...rawPositions.map(p => p.y)) + CARD_H
+  }, [rawPositions])
+
+  // When the grid is smaller than the visible board, center it instead
+  // of pinning it to the top-left corner. Falls back to a flat margin
+  // once there's no slack left to center within.
+  const offsetX = useMemo(() => Math.max(24, (size.w - gridW) / 2), [size.w, gridW])
+  const offsetY = useMemo(() => Math.max(24, (size.h - gridH) / 2), [size.h, gridH])
+
+  const positions = useMemo(
+    () => rawPositions.map(p => ({ x: p.x + offsetX, y: p.y + offsetY })),
+    [rawPositions, offsetX, offsetY]
+  )
+  const edges = useMemo(() => getEdges(orderedClusters), [orderedClusters])
 
   // Content bounds so the container is exactly as big as it needs to be —
-  // no bigger — so cards never end up scattered across empty space
+  // no bigger — so cards never end up scattered across empty space.
+  // Trailing margin matches the leading offset for a symmetric, centered
+  // look whenever there's slack to center within.
   const contentW = useMemo(() => {
     if (!positions.length) return 0
-    return Math.max(...positions.map(p => p.x)) + CARD_W + 24
-  }, [positions])
+    return Math.max(...positions.map(p => p.x)) + CARD_W + offsetX
+  }, [positions, offsetX])
   const contentH = useMemo(() => {
     if (!positions.length) return 0
-    return Math.max(...positions.map(p => p.y)) + CARD_H + 24
-  }, [positions])
+    return Math.max(...positions.map(p => p.y)) + CARD_H + offsetY
+  }, [positions, offsetY])
 
   const measure = useCallback(() => {
     if (!containerRef.current) return
@@ -98,8 +182,8 @@ export function Graph({ clusters, selectedId, onSelect }: Props) {
     const ctx = canvas.getContext("2d")!
     ctx.scale(dpr, dpr)
 
-    edges.forEach(({ a, b, strength }) => {
-      const ca = clusters[a], cb = clusters[b]
+    edges.forEach(({ a, b, strength, viaCategory }) => {
+      const ca = orderedClusters[a], cb = orderedClusters[b]
       if (!ca || !cb) return
 
       const posA = positions[a]
@@ -112,8 +196,6 @@ export function Graph({ clusters, selectedId, onSelect }: Props) {
       const by = (posB.y + CARD_H / 2) * zoom
 
       const isHighlighted = selectedId !== null && (ca.id === selectedId || cb.id === selectedId)
-      // More shared keywords = a more solid, more visible line
-      const baseOpacity = Math.min(0.28 + strength * 0.1, 0.55)
 
       ctx.beginPath()
       ctx.moveTo(ax, ay)
@@ -122,22 +204,34 @@ export function Graph({ clusters, selectedId, onSelect }: Props) {
         (ay + by) / 2 - 28 * zoom,
         bx, by
       )
-      ctx.strokeStyle = isHighlighted
-        ? "rgba(186,117,23,0.55)"
-        : `rgba(186,117,23,${baseOpacity})`
-      ctx.lineWidth = isHighlighted ? 1.5 : Math.min(1, 0.9 + strength * 0.3)
-      ctx.setLineDash(isHighlighted ? [] : [4, 5])
+
+      if (viaCategory) {
+        // Category-relatedness is a weaker signal than an actual shared
+        // keyword, so it stays visibly fainter/thinner than a real match
+        // even when selected — but still needs enough weight to read
+        // against the dot-grid background
+        ctx.strokeStyle = isHighlighted ? "rgba(186,117,23,0.45)" : "rgba(186,117,23,0.26)"
+        ctx.lineWidth = isHighlighted ? 1.4 : 1.1
+        ctx.setLineDash([2, 4])
+      } else {
+        // More shared keywords = a more solid, more visible line
+        const baseOpacity = Math.min(0.42 + strength * 0.12, 0.75)
+        ctx.strokeStyle = isHighlighted ? "rgba(186,117,23,0.75)" : `rgba(186,117,23,${baseOpacity})`
+        ctx.lineWidth = isHighlighted ? 2.2 : Math.min(1.8, 1.3 + strength * 0.3)
+        ctx.setLineDash(isHighlighted ? [] : [4, 5])
+      }
+
       ctx.stroke()
       ctx.setLineDash([])
     })
-  }, [clusters, edges, positions, selectedId, size, zoom, contentW, contentH])
+  }, [orderedClusters, edges, positions, selectedId, size, zoom, contentW, contentH])
 
 
   return (
     // Outer container — clips and allows scrolling when zoomed
     <div ref={containerRef} style={{ flex: 1, position: "relative", overflow: "auto", background: "#FDFCFB",
-      backgroundImage: "linear-gradient(rgba(186,117,23,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(186,117,23,0.07) 1px, transparent 1px)",
-      backgroundSize: "32px 32px"
+      backgroundImage: "radial-gradient(rgba(186,117,23,0.35) 1px, transparent 1px)",
+      backgroundSize: "16px 16px"
     }}>
 
       {/* Inner wrapper — sized to fit the actual content, not the full viewport */}
@@ -147,7 +241,7 @@ export function Graph({ clusters, selectedId, onSelect }: Props) {
         <canvas ref={canvasRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />
 
         {/* Cards — positioned at fixed pixel coordinates */}
-        {clusters.map((cluster, i) => {
+        {orderedClusters.map((cluster, i) => {
           const pos = positions[i]
           if (!pos) return null
           return (
@@ -180,7 +274,7 @@ export function Graph({ clusters, selectedId, onSelect }: Props) {
           background: "rgba(255,255,255,0.85)", padding: "4px 9px", borderRadius: "6px",
           border: "0.5px solid #E8E5DE"
         }}>
-          Lines connect clusters that share keywords
+          Lines connect clusters that share keywords or related topics
         </div>
       )}
 

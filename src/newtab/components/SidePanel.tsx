@@ -1,5 +1,6 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import type { Cluster } from "~lib/clustering"
+import type { TabRecord } from "~lib/storage"
 import { TabRow } from "./TabRow"
 
 interface Props {
@@ -7,6 +8,22 @@ interface Props {
   onClose: () => void
   onAction: () => void
   scrollToTags?: boolean
+}
+
+// Search only earns its place once a list is long enough to actually
+// need it — below this, scrolling through everything is faster than
+// typing.
+const SEARCH_THRESHOLD = 6
+
+function groupByDomain(tabs: TabRecord[]): { domain: string; tabs: TabRecord[] }[] {
+  const groups = new Map<string, TabRecord[]>()
+  for (const tab of tabs) {
+    if (!groups.has(tab.domain)) groups.set(tab.domain, [])
+    groups.get(tab.domain)!.push(tab)
+  }
+  return [...groups.entries()]
+    .map(([domain, tabs]) => ({ domain, tabs }))
+    .sort((a, b) => b.tabs.length - a.tabs.length)
 }
 
 function CollapsibleSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
@@ -30,6 +47,28 @@ function CollapsibleSection({ title, defaultOpen = true, children }: { title: st
 
 export function SidePanel({ cluster, onClose, onAction, scrollToTags }: Props) {
   const visible = !!cluster
+  const [search, setSearch] = useState("")
+
+  // Reset search whenever the selected cluster changes, so a filter
+  // typed for one pill doesn't silently carry over into the next
+  const clusterId = cluster?.id
+  const [lastClusterId, setLastClusterId] = useState(clusterId)
+  if (clusterId !== lastClusterId) {
+    setLastClusterId(clusterId)
+    if (search) setSearch("")
+  }
+
+  const filteredTabs = useMemo(() => {
+    if (!cluster) return []
+    const q = search.trim().toLowerCase()
+    if (!q) return cluster.tabs
+    return cluster.tabs.filter(t =>
+      (t.title ?? "").toLowerCase().includes(q) || t.domain.toLowerCase().includes(q)
+    )
+  }, [cluster, search])
+
+  const isMisc = cluster?.category === "uncategorised"
+  const showSearch = (cluster?.tabs.length ?? 0) > SEARCH_THRESHOLD
 
   return (
     <div style={{
@@ -73,11 +112,52 @@ export function SidePanel({ cluster, onClose, onAction, scrollToTags }: Props) {
 
           {/* TABS first */}
           <CollapsibleSection title="TABS" defaultOpen={true}>
-            <div>
-              {cluster.tabs.map((tab, i) => (
-                <TabRow key={tab.id ?? i} tab={tab} defaultOpen={i === 0} onAction={onAction} />
-              ))}
-            </div>
+            {showSearch && (
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search title or domain…"
+                style={{
+                  width: "100%", fontSize: "12px", padding: "6px 9px",
+                  border: "0.5px solid #E8E5DE", borderRadius: "6px",
+                  marginBottom: "10px", background: "#fff", color: "#2C2C2A",
+                  outline: "none"
+                }}
+              />
+            )}
+
+            {filteredTabs.length === 0 && (
+              <div style={{ fontSize: "11px", color: "#9E9080", padding: "8px 0" }}>
+                No tabs match "{search}"
+              </div>
+            )}
+
+            {isMisc ? (
+              // Miscellaneous mixes unrelated sites, so group by domain
+              // instead of one long undifferentiated list
+              groupByDomain(filteredTabs).map(group => (
+                <div key={group.domain} style={{ marginBottom: "10px" }}>
+                  <div style={{
+                    fontSize: "9.5px", fontWeight: 600, color: "#9E9080",
+                    textTransform: "uppercase", letterSpacing: "0.4px",
+                    marginBottom: "4px", display: "flex", justifyContent: "space-between"
+                  }}>
+                    <span>{group.domain}</span>
+                    <span>{group.tabs.length}</span>
+                  </div>
+                  {group.tabs.map((tab, i) => (
+                    <TabRow key={tab.id ?? i} tab={tab} defaultOpen={false} onAction={onAction} />
+                  ))}
+                </div>
+              ))
+            ) : (
+              <div>
+                {filteredTabs.map((tab, i) => (
+                  <TabRow key={tab.id ?? i} tab={tab} defaultOpen={i === 0 && !search} onAction={onAction} />
+                ))}
+              </div>
+            )}
           </CollapsibleSection>
 
           {/* TOPICS below — collapsed by default */}
