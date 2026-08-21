@@ -82,10 +82,10 @@ export function SidePanel({ cluster, onClose, onAction, scrollToTags }: Props) {
       flexDirection: "column"
     }}>
       {cluster && (
-        <div style={{ minWidth: "240px", padding: "14px", flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+        <div style={{ minWidth: "240px", padding: "14px", flex: 1, height: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
           {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
               <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: cluster.color.dot }} />
               <span style={{ fontSize: "13px", fontWeight: 500, color: "#2C2C2A" }}>{cluster.label}</span>
@@ -99,7 +99,7 @@ export function SidePanel({ cluster, onClose, onAction, scrollToTags }: Props) {
           </div>
 
           {/* Meta */}
-          <div style={{ fontSize: "11px", color: "#888780", marginBottom: "16px" }}>
+          <div style={{ fontSize: "11px", color: "#888780", marginBottom: "16px", flexShrink: 0 }}>
             {cluster.tabs.length} tabs · {
               (() => {
                 const ms = cluster.totalTime
@@ -110,8 +110,14 @@ export function SidePanel({ cluster, onClose, onAction, scrollToTags }: Props) {
             } browsing
           </div>
 
-          {/* TABS first */}
-          <CollapsibleSection title="TABS" defaultOpen={true}>
+          {/* TABS — capped at 70% of the panel height with its own
+              internal scroll, so TOPICS always stays visible below it
+              instead of requiring the whole panel to scroll */}
+          <div style={{ flexShrink: 0, maxHeight: "70%", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px", flexShrink: 0 }}>
+              <div style={{ fontSize: "10px", fontWeight: 600, color: "#BA7517", letterSpacing: "0.5px" }}>TABS</div>
+            </div>
+
             {showSearch && (
               <input
                 type="text"
@@ -122,59 +128,63 @@ export function SidePanel({ cluster, onClose, onAction, scrollToTags }: Props) {
                   width: "100%", fontSize: "12px", padding: "6px 9px",
                   border: "0.5px solid #E8E5DE", borderRadius: "6px",
                   marginBottom: "10px", background: "#fff", color: "#2C2C2A",
-                  outline: "none"
+                  outline: "none", flexShrink: 0
                 }}
               />
             )}
 
-            {filteredTabs.length === 0 && (
-              <div style={{ fontSize: "11px", color: "#9E9080", padding: "8px 0" }}>
-                No tabs match "{search}"
-              </div>
-            )}
+            <div style={{ overflowY: "auto" }}>
+              {filteredTabs.length === 0 && (
+                <div style={{ fontSize: "11px", color: "#9E9080", padding: "8px 0" }}>
+                  No tabs match "{search}"
+                </div>
+              )}
 
-            {isMisc ? (
-              // Miscellaneous mixes unrelated sites, so group by domain
-              // instead of one long undifferentiated list
-              groupByDomain(filteredTabs).map(group => (
-                <div key={group.domain} style={{ marginBottom: "10px" }}>
-                  <div style={{
-                    fontSize: "9.5px", fontWeight: 600, color: "#9E9080",
-                    textTransform: "uppercase", letterSpacing: "0.4px",
-                    marginBottom: "4px", display: "flex", justifyContent: "space-between"
-                  }}>
-                    <span>{group.domain}</span>
-                    <span>{group.tabs.length}</span>
+              {isMisc ? (
+                // Miscellaneous mixes unrelated sites, so group by domain
+                // instead of one long undifferentiated list
+                groupByDomain(filteredTabs).map(group => (
+                  <div key={group.domain} style={{ marginBottom: "10px" }}>
+                    <div style={{
+                      fontSize: "9.5px", fontWeight: 600, color: "#9E9080",
+                      textTransform: "uppercase", letterSpacing: "0.4px",
+                      marginBottom: "4px", display: "flex", justifyContent: "space-between"
+                    }}>
+                      <span>{group.domain}</span>
+                      <span>{group.tabs.length}</span>
+                    </div>
+                    {group.tabs.map((tab, i) => (
+                      <TabRow key={tab.id ?? i} tab={tab} defaultOpen={false} onAction={onAction} />
+                    ))}
                   </div>
-                  {group.tabs.map((tab, i) => (
-                    <TabRow key={tab.id ?? i} tab={tab} defaultOpen={false} onAction={onAction} />
+                ))
+              ) : (
+                <div>
+                  {filteredTabs.map((tab, i) => (
+                    <TabRow key={tab.id ?? i} tab={tab} defaultOpen={i === 0 && !search} onAction={onAction} />
                   ))}
                 </div>
-              ))
-            ) : (
-              <div>
-                {filteredTabs.map((tab, i) => (
-                  <TabRow key={tab.id ?? i} tab={tab} defaultOpen={i === 0 && !search} onAction={onAction} />
+              )}
+            </div>
+          </div>
+
+          {/* TOPICS below — always visible, not capped or scrolled */}
+          <div style={{ marginTop: "16px", overflowY: "auto", flexShrink: 1 }}>
+            <CollapsibleSection title="TOPICS" defaultOpen={true}>
+              <div style={{ lineHeight: "2.2" }}>
+                {cluster.keywords.map(kw => (
+                  <span key={kw} style={{
+                    fontSize: "11px", padding: "3px 8px", borderRadius: "20px",
+                    display: "inline-block", margin: "2px 2px 2px 0",
+                    background: cluster.color.bg, color: cluster.color.accent,
+                    border: `0.5px solid ${cluster.color.bc}`
+                  }}>
+                    {kw}
+                  </span>
                 ))}
               </div>
-            )}
-          </CollapsibleSection>
-
-          {/* TOPICS below — collapsed by default */}
-          <CollapsibleSection title="TOPICS" defaultOpen={scrollToTags ?? false}>
-            <div style={{ lineHeight: "2.2" }}>
-              {cluster.keywords.map(kw => (
-                <span key={kw} style={{
-                  fontSize: "11px", padding: "3px 8px", borderRadius: "20px",
-                  display: "inline-block", margin: "2px 2px 2px 0",
-                  background: cluster.color.bg, color: cluster.color.accent,
-                  border: `0.5px solid ${cluster.color.bc}`
-                }}>
-                  {kw}
-                </span>
-              ))}
-            </div>
-          </CollapsibleSection>
+            </CollapsibleSection>
+          </div>
 
         </div>
       )}

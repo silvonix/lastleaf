@@ -112,7 +112,7 @@ export function Graph({ clusters, selectedId, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
-  const [zoom, setZoom] = useState(1.0)
+  const [zoom, setZoom] = useState(1.15)
 
   // Miscellaneous always sits at the grid's center slot rather than
   // wherever its tab count would naturally rank it
@@ -197,32 +197,84 @@ export function Graph({ clusters, selectedId, onSelect }: Props) {
 
       const isHighlighted = selectedId !== null && (ca.id === selectedId || cb.id === selectedId)
 
-      ctx.beginPath()
-      ctx.moveTo(ax, ay)
-      ctx.quadraticCurveTo(
-        (ax + bx) / 2,
-        (ay + by) / 2 - 28 * zoom,
-        bx, by
-      )
+      // Bow the curve higher so it clears any card sitting between the
+      // two real endpoints, instead of skimming close enough to look
+      // like it terminates there
+      const arcHeight = 52 * zoom
+      const controlX = (ax + bx) / 2
+      const controlY = (ay + by) / 2 - arcHeight
 
+      // The card DOM elements paint on top of this canvas, so anything
+      // drawn at a card's center (ax,ay / bx,by) is invisible — hidden
+      // underneath the opaque card. Find where the line to the control
+      // point actually crosses the card's border instead, and draw
+      // (and mark) from there, in open canvas space.
+      const halfW = (CARD_W / 2) * zoom
+      const halfH = (CARD_H / 2) * zoom
+
+      function edgePoint(cx: number, cy: number, dx: number, dy: number) {
+        const tx = dx !== 0 ? halfW / Math.abs(dx) : Infinity
+        const ty = dy !== 0 ? halfH / Math.abs(dy) : Infinity
+        const t = Math.min(tx, ty, 1)
+        return { x: cx + dx * t, y: cy + dy * t }
+      }
+
+      const startPt = edgePoint(ax, ay, controlX - ax, controlY - ay)
+      const endPt = edgePoint(bx, by, controlX - bx, controlY - by)
+
+      ctx.beginPath()
+      ctx.moveTo(startPt.x, startPt.y)
+      ctx.quadraticCurveTo(controlX, controlY, endPt.x, endPt.y)
+
+      let strokeColor: string
       if (viaCategory) {
         // Category-relatedness is a weaker signal than an actual shared
         // keyword, so it stays visibly fainter/thinner than a real match
         // even when selected — but still needs enough weight to read
         // against the dot-grid background
-        ctx.strokeStyle = isHighlighted ? "rgba(186,117,23,0.45)" : "rgba(186,117,23,0.26)"
+        strokeColor = isHighlighted ? "rgba(186,117,23,0.45)" : "rgba(186,117,23,0.26)"
+        ctx.strokeStyle = strokeColor
         ctx.lineWidth = isHighlighted ? 1.4 : 1.1
         ctx.setLineDash([2, 4])
       } else {
         // More shared keywords = a more solid, more visible line
         const baseOpacity = Math.min(0.42 + strength * 0.12, 0.75)
-        ctx.strokeStyle = isHighlighted ? "rgba(186,117,23,0.75)" : `rgba(186,117,23,${baseOpacity})`
+        strokeColor = isHighlighted ? "rgba(186,117,23,0.75)" : `rgba(186,117,23,${baseOpacity})`
+        ctx.strokeStyle = strokeColor
         ctx.lineWidth = isHighlighted ? 2.2 : Math.min(1.8, 1.3 + strength * 0.3)
         ctx.setLineDash(isHighlighted ? [] : [4, 5])
       }
 
       ctx.stroke()
       ctx.setLineDash([])
+
+      // Double-headed arrowhead at each end, pointing into the card it
+      // touches — a much more standard "this line terminates here"
+      // convention than a dot, and pointing into BOTH ends (rather than
+      // just one) avoids implying a direction/causation this connection
+      // doesn't actually have — keyword and category relatedness are
+      // symmetric, not "A leads to B".
+      const arrowSize = (isHighlighted ? 8 : 6.5) * zoom
+
+      function drawArrowhead(tipX: number, tipY: number, dirX: number, dirY: number) {
+        const len = Math.hypot(dirX, dirY) || 1
+        const ux = dirX / len, uy = dirY / len
+        const px = -uy, py = ux
+        const backX = tipX - ux * arrowSize
+        const backY = tipY - uy * arrowSize
+        const halfW = arrowSize * 0.42
+
+        ctx.beginPath()
+        ctx.moveTo(tipX, tipY)
+        ctx.lineTo(backX + px * halfW, backY + py * halfW)
+        ctx.lineTo(backX - px * halfW, backY - py * halfW)
+        ctx.closePath()
+        ctx.fillStyle = strokeColor
+        ctx.fill()
+      }
+
+      drawArrowhead(startPt.x, startPt.y, ax - controlX, ay - controlY)
+      drawArrowhead(endPt.x, endPt.y, bx - controlX, by - controlY)
     })
   }, [orderedClusters, edges, positions, selectedId, size, zoom, contentW, contentH])
 

@@ -121,7 +121,6 @@ export default function Popup() {
           >
             <i className="ti ti-world" style={{ fontSize: "13px" }} aria-hidden="true" />
           </button>
-          <span style={{ fontSize: "11px", color: "#B4B2A9" }}>v{chrome.runtime.getManifest().version}</span>
         </div>
       </div>
 
